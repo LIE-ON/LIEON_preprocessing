@@ -11,32 +11,40 @@ Original file is located at
 !pip install huggingface-hub
 
 import os
-from pyannote.audio import Pipeline, Audio
-from pyannote.core import Segment
+from pyannote.audio import Pipeline
+from pyannote.core import Segment, notebook, Annotation
 import csv
+import matplotlib.pyplot as plt
 
 # Hugging Face API 토큰
-use_auth_token = "hf"
+use_auth_token = "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"
 
 # 환경 변수로 토큰 설정
 os.environ["HUGGINGFACEHUB_API_TOKEN"] = use_auth_token
 
 # 사전 학습된 음성 분할 파이프라인 로드
 pipeline = Pipeline.from_pretrained("pyannote/speaker-diarization-3.1", use_auth_token=use_auth_token)
+silence_pipeline = Pipeline.from_pretrained("pyannote/voice-activity-detection", use_auth_token=use_auth_token)
 
 # 음성 파일 경로
 audio_file = "/content/drive/MyDrive/보이스피싱 실제 통화내용_[cut_39sec].wav"
 
-# Commented out IPython magic to ensure Python compatibility.
+# 묵음 검출
+if silence_pipeline is not None:
+    silence_result = silence_pipeline(audio_file)
+    silence_segments = silence_result.get_timeline().support()
+else:
+    print("Failed to load the silence detection model.")
+    silence_segments = []
+    
 # 음성 파일 처리
 if pipeline is not None:
     diarization = pipeline(audio_file, num_speakers=2)
 
     # 라벨링 결과 출력 및 CSV 파일 저장
     label_mapping = {}
-    label_counter = 0
+    label_counter = 1  # 라벨 카운터를 1로 시작하여 묵음 라벨과 겹치지 않도록 함
 
-    # CSV 파일 경로
     # CSV 파일 경로
     output_csv_file = "/content/drive/MyDrive/labeled_segments.csv"
 
@@ -54,20 +62,24 @@ if pipeline is not None:
 
         writer.writeheader()
 
-        # 라벨링 결과 작성
+        # 묵음 구간 라벨링
+        annotation = Annotation()
+        for segment in silence_segments:
+            writer.writerow({'Start': segment.start, 'End': segment.end, 'Speaker': 'Silence', 'Label': 0})
+            annotation[Segment(start=segment.start, end=segment.end)] = 'Silence'
+
+        # 화자 구간 라벨링
         for turn, _, speaker in diarization.itertracks(yield_label=True):
             if speaker not in label_mapping:
                 label_mapping[speaker] = label_counter
                 label_counter += 1
             label = label_mapping[speaker]
             writer.writerow({'Start': turn.start, 'End': turn.end, 'Speaker': speaker, 'Label': label})
+            annotation[Segment(start=turn.start, end=turn.end)] = speaker
 
     # 시각화
-    import matplotlib.pyplot as plt
-    from pyannote.core import notebook
-#     %matplotlib inline
     fig, ax = plt.subplots()
-    notebook.plot_annotation(diarization, ax=ax, time=True)
+    notebook.plot_annotation(annotation, ax=ax, time=True)
     plt.show()
 else:
-    print("Failed to load the pre-trained model.")
+    print("Failed to load the speaker diarization model.")
